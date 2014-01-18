@@ -45,6 +45,7 @@ import android.media.MediaScannerConnection;
 import android.media.MediaScannerConnection.MediaScannerConnectionClient;
 import android.net.Uri;
 import android.os.Environment;
+import android.os.Build;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.util.Log;
