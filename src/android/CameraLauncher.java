@@ -46,6 +46,7 @@ import android.media.MediaScannerConnection.MediaScannerConnectionClient;
 import android.net.Uri;
 import android.os.Environment;
 import android.os.Build;
+import android.os.Bundle;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.util.Log;
@@ -92,6 +93,8 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
     private MediaScannerConnection conn;    // Used to update gallery app with newly-written files
     private Uri scanMe;                     // Uri of image to be added to content store
+    private boolean saveResult;    // Save result instead of using callback (if app restarts)
+    private String lastResult;
 
     /**
      * Executes the request and returns PluginResult.
@@ -102,9 +105,9 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      * @return              	A PluginResult object with a status and message.
      */
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
-        this.callbackContext = callbackContext;
 
         if (action.equals("takePicture")) {
+            this.callbackContext = callbackContext;
             int srcType = CAMERA;
             int destType = FILE_URI;
             this.saveToPhotoAlbum = false;
@@ -124,6 +127,8 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             //this.allowEdit = args.getBoolean(7); // This field is unused.
             this.correctOrientation = args.getBoolean(8);
             this.saveToPhotoAlbum = args.getBoolean(9);
+            this.saveResult = false;
+            this.lastResult = null;
 
             // If the user specifies a 0 or smaller width/height
             // make it -1 so later comparisons succeed
@@ -153,6 +158,15 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             PluginResult r = new PluginResult(PluginResult.Status.NO_RESULT);
             r.setKeepCallback(true);
             callbackContext.sendPluginResult(r);
+            
+            return true;
+        } else if (action.equals("getLastResult")) {
+            if (this.lastResult == null) {
+                callbackContext.error("No last result available");
+            } else {
+                callbackContext.success(this.lastResult);
+                this.lastResult = null;
+            }
             
             return true;
         }
@@ -345,6 +359,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
                         if (uri == null) {
                             this.failPicture("Error capturing image - no media storage found.");
+                            return;
                         }
 
                         // If all this is true we shouldn't compress the image.
@@ -352,7 +367,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                                 !this.correctOrientation) {
                             writeUncompressedImage(uri);
 
-                            this.callbackContext.success(uri.toString());
+                            successPicture(uri.toString());
                         } else {
                             bitmap = getScaledBitmap(FileHelper.stripFileProtocol(imageUri.toString()));
 
@@ -379,7 +394,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
                         }
                         // Send Uri back to JavaScript for viewing image
-                        this.callbackContext.success(uri.toString());
+                        successPicture(uri.toString());
                     }
 
                     this.cleanup(FILE_URI, this.imageUri, uri, bitmap);
@@ -410,14 +425,14 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 // If you ask for video or all media type you will automatically get back a file URI
                 // and there will be no attempt to resize any returned data
                 if (this.mediaType != PICTURE) {
-                    this.callbackContext.success(uri.toString());
+                    successPicture(uri.toString());
                 }
                 else {
                     // This is a special case to just return the path as no scaling,
                     // rotating, nor compressing needs to be done
                     if (this.targetHeight == -1 && this.targetWidth == -1 &&
                             (destType == FILE_URI || destType == NATIVE_URI) && !this.correctOrientation) {
-                        this.callbackContext.success(uri.toString());
+                        successPicture(uri.toString());
                     } else {
                         String uriString = uri.toString();
                         // Get the path to the image. Makes loading so much easier.
@@ -486,14 +501,14 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
                                     // The resized image is cached by the app in order to get around this and not have to delete you
                                     // application cache I'm adding the current system time to the end of the file url.
-                                    this.callbackContext.success("file://" + resizePath + "?" + System.currentTimeMillis());
+                                    successPicture("file://" + resizePath + "?" + System.currentTimeMillis());
                                 } catch (Exception e) {
                                     e.printStackTrace();
                                     this.failPicture("Error retrieving image.");
                                 }
                             }
                             else {
-                                this.callbackContext.success(uri.toString());
+                                successPicture(uri.toString());
                             }
                         }
                         if (bitmap != null) {
@@ -798,7 +813,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 byte[] code = jpeg_data.toByteArray();
                 byte[] output = Base64.encode(code, Base64.NO_WRAP);
                 String js_out = new String(output);
-                this.callbackContext.success(js_out);
+                successPicture(js_out);
                 js_out = null;
                 output = null;
                 code = null;
@@ -816,6 +831,22 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     public void failPicture(String err) {
         this.callbackContext.error(err);
+    }
+    
+    /**
+     * Send success message with the image data/url to JavaScript
+     * 
+     * @param data Image data or url
+     */
+    public void successPicture(String data) {
+        if (this.saveResult) {
+            // We use the JSONObject to get proper escaping
+            this.lastResult = data;
+            Log.i(LOG_TAG, "Saving takePicture result for getLastResult()");
+        } else {
+            Log.i(LOG_TAG, "Immediately returning takePicture() result to JS");
+            this.callbackContext.success(data);
+        }
     }
 
     private void scanForGallery(Uri newImage) {
@@ -838,5 +869,50 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
     public void onScanCompleted(String path, Uri uri) {
         this.conn.disconnect();
+    }
+
+    /**
+     * Called if this activity shutsdown while taking photo from gallery or camera.
+     * Only used by the ShhareMyWorld app for now
+     * 
+     * @param pluginState 
+     */
+    public void savePluginState(Bundle pluginState) {
+        pluginState.putInt("mQuality", mQuality);
+        pluginState.putInt("targetWidth", targetWidth);
+        pluginState.putInt("targetHeight", targetHeight);
+        
+        if (imageUri != null) {
+            pluginState.putString("imageUri", imageUri.toString());
+        }
+        
+        pluginState.putInt("encodingType", encodingType);
+        pluginState.putInt("mediaType", mediaType);
+        pluginState.putInt("numPics", numPics);
+        pluginState.putBoolean("saveToPhotoAlbum", saveToPhotoAlbum);
+        pluginState.putBoolean("correctOrientation", correctOrientation);
+    }
+    
+    /**
+     * Called upon activity restoration if we were just fetching picture from gallery, camera
+     * Only used by the ShhareMyWorld app for now
+     * @param pluginState 
+     */
+    public void restorePluginState(Bundle pluginState) {
+        this.mQuality = pluginState.getInt("mQuality");
+        this.targetWidth = pluginState.getInt("targetWidth");
+        this.targetHeight = pluginState.getInt("targetHeight");
+        
+        if (pluginState.containsKey("imageUri")) {
+            this.imageUri = Uri.parse(pluginState.getString("imageUri"));
+        }
+        
+        this.encodingType = pluginState.getInt("encodingType");
+        this.mediaType = pluginState.getInt("mediaType");
+        this.numPics = pluginState.getInt("numPics");
+        this.saveToPhotoAlbum = pluginState.getBoolean("saveToPhotoAlbum");
+        this.correctOrientation = pluginState.getBoolean("correctOrientation");
+        
+        this.saveResult = true;
     }
 }
