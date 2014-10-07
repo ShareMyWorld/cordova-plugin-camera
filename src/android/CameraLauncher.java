@@ -302,35 +302,9 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
         }
 
         if (this.cordova != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                //KITKAT changed how intents worked 
-                //so as a workaround we start the gallery app directly 
-                intent = new Intent(Intent.ACTION_PICK,android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
-                this.cordova.startActivityForResult((CordovaPlugin) this,intent, (srcType + 1) * 16 + returnType + 1);
-    
-            } else {
-                intent = new Intent(Intent.ACTION_GET_CONTENT);
-            
-                String title = GET_PICTURE;
-                if (this.mediaType == PICTURE) {
-                    intent.setType("image/*");
-                }
-                else if (this.mediaType == VIDEO) {
-                    intent.setType("video/*");
-                    title = GET_VIDEO;
-                }
-                else if (this.mediaType == ALLMEDIA) {
-                    // I wanted to make the type 'image/*, video/*' but this does not work on all versions
-                    // of android so I had to go with the wildcard search.
-                    intent.setType("*/*");
-                    title = GET_All;
-                }
-
-                intent.setAction(Intent.ACTION_GET_CONTENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
                 this.cordova.startActivityForResult((CordovaPlugin) this, Intent.createChooser(intent,
                         new String(title)), (srcType + 1) * 16 + returnType + 1);
-            }
+            
         }
     }
 
